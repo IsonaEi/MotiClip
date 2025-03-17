@@ -1,0 +1,63 @@
+# Python 相關
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.dll
+*.o
+*.a
+*.out
+*.dylib
+.ipynb_checkpoints/
+
+# 虛擬環境
+venv/
+env/
+*.venv
+Pipfile
+Pipfile.lock
+conda-meta/
+
+# 影片資料（避免 Git 儲存大檔案）
+data/uploads/raw/
+data/uploads/processed/
+data/uploads/metadata/
+static/frames/
+temp/
+*.mp4
+*.avi
+*.mov
+*.mts
+*.mkv
+cropped/
+dataset/
+test/
+
+
+# 影像檔案（暫存）
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tiff
+
+# VSCode 設定
+.vscode/
+*.code-workspace
+
+# 設定檔
+config.json
+secrets.json
+
+# 日誌 & Debug
+*.log
+debug.log
+nohup.out
+
+# TensorRT / FFmpeg 相關
+trt_engine_cache/
+*.ts
+*.m3u8
+*.tmp
+*.h264
+*.h265

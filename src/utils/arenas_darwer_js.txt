@@ -1,0 +1,361 @@
+<script src="https://unpkg.com/konva@9/konva.min.js"></script>
+<script>
+// ========== 全域變數宣告 ==========
+let stage, layer, bgImage;
+let arenaList = [];
+let selectedarena = null;
+let usedIDs = new Set();
+let originalWidth = 0;
+let originalHeight = 0;
+window.scaleFactorX = 1;
+window.scaleFactorY = 1;
+
+// 內建色彩陣列 (半透明色)
+const pastelColors = [
+  'rgba(255, 179, 186, 0.5)',
+  'rgba(255, 223, 186, 0.5)',
+  'rgba(255, 255, 186, 0.5)',
+  'rgba(186, 255, 201, 0.5)',
+  'rgba(186, 225, 255, 0.5)'
+];
+let colorIndex = 0;
+
+// ========== 工具函式 ==========
+// 取得下一個可用的數字ID
+function getNextAvailableNumericID() {
+  let i = 1;
+  while (usedIDs.has(i)) { i++; }
+  usedIDs.add(i);
+  return i;
+}
+
+// 釋放已使用的數字ID
+function releaseNumericID(numId) {
+  if (usedIDs.has(numId)) { usedIDs.delete(numId); }
+}
+
+// 限制數值介於 min 與 max 之間
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+// 取得下一個顏色
+function getNextColor() {
+  const color = pastelColors[colorIndex % pastelColors.length];
+  colorIndex++;
+  return color;
+}
+
+// ========== 畫布初始化函式 ==========
+// 初始化 Konva 畫布，imageURL 為背景圖片來源 (中間幀圖片)
+function initKonva(imageURL) {
+  const container = document.getElementById("arena-container");
+  if (!container) {
+    console.error("找不到 #arena-container 容器");
+    return;
+  }
+  // 初始設定 stage 尺寸為 540，後續依圖片調整
+  stage = new Konva.Stage({
+    container: 'arena-container',
+    width: 540,
+    height: 540
+  });
+  layer = new Konva.Layer();
+  stage.add(layer);
+
+  const imageObj = new Image();
+  imageObj.onload = function() {
+    originalWidth = imageObj.naturalWidth;
+    originalHeight = imageObj.naturalHeight;
+    let newWidth, newHeight;
+    if (originalWidth >= originalHeight) {
+      newWidth = 540;
+      newHeight = 540 * (originalHeight / originalWidth);
+    } else {
+      newHeight = 540;
+      newWidth = 540 * (originalWidth / originalHeight);
+    }
+    stage.width(newWidth);
+    stage.height(newHeight);
+    window.scaleFactorX = newWidth / originalWidth;
+    window.scaleFactorY = newHeight / originalHeight;
+    bgImage = new Konva.Image({
+      x: 0,
+      y: 0,
+      image: imageObj,
+      width: newWidth,
+      height: newHeight,
+      name: 'bgImage'
+    });
+    layer.add(bgImage);
+    layer.batchDraw();
+  };
+  if (imageURL) {
+    if (typeof imageURL === 'object' && imageURL !== null) {
+      imageObj.src = imageURL.url || imageURL.name || '';
+    } else {
+      imageObj.src = imageURL;
+    }
+  } else {
+    imageObj.src = "";
+  }
+  // 註冊滑鼠事件 (點擊背景可取消選取)
+  stage.on('mousedown', function(e) {
+    if (e.evt.button !== 0) return;
+    if (e.target === stage || e.target === bgImage) {
+      clearSelection();
+      return;
+    }
+    if (e.target.name().startsWith('corner_')) { return; }
+    if (e.target.name().startsWith('arena_')) {
+      let arenaId = e.target.name();
+      selectarena(arenaId);
+    }
+  });
+  stage.on('mouseup', function(e) {
+    if (e.evt.button !== 0) return;
+  });
+}
+
+// ========== arena 標註相關函式 ==========
+// 取消選取所有 arena
+function clearSelection() {
+  arenaList.forEach(r => { r.polygon.strokeWidth(1); });
+  selectedarena = null;
+  layer.draw();
+}
+
+// 新增 arena，若傳入 points 則以該點集作為預設值，否則使用預設矩形
+function createNewarena(points) {
+  let defaultPoints = points || [50, 50, 150, 50, 150, 150, 50, 150];
+  let numericId = getNextAvailableNumericID();
+  const arenaId = `arena_${numericId}`;
+  const color = getNextColor();
+  let polygon = null;
+  const group = new Konva.Group({
+    draggable: true,
+    dragBoundFunc: (pos) => {
+      if (!polygon) return pos;
+      let pts = polygon.points();
+      let minX = pts[0], maxX = pts[0];
+      let minY = pts[1], maxY = pts[1];
+      for (let i = 2; i < pts.length; i += 2) {
+        if (pts[i] < minX) minX = pts[i];
+        if (pts[i] > maxX) maxX = pts[i];
+        if (pts[i+1] < minY) minY = pts[i+1];
+        if (pts[i+1] > maxY) maxY = pts[i+1];
+      }
+      let stageW = stage.width();
+      let stageH = stage.height();
+      let newX = pos.x;
+      let newY = pos.y;
+      if (newX + minX < 0) { newX = -minX; }
+      if (newX + maxX > stageW) { newX = stageW - maxX; }
+      if (newY + minY < 0) { newY = -minY; }
+      if (newY + maxY > stageH) { newY = stageH - maxY; }
+      return { x: newX, y: newY };
+    }
+  });
+  group.on('dragmove', function(e) {
+    updatearenaList();
+  });
+  polygon = new Konva.Line({
+    points: defaultPoints,
+    fill: color,
+    stroke: color.replace('0.5)', '1.0)'),
+    strokeWidth: 1,
+    closed: true,
+    name: arenaId
+  });
+  group.add(polygon);
+  // 加入標籤，顯示 arena ID
+  const arenaLabel = new Konva.Label({
+    x: defaultPoints[0] + 5,
+    y: defaultPoints[1] + 5,
+    opacity: 0.8
+  });
+  arenaLabel.add(new Konva.Tag({ fill: 'white' }));
+  arenaLabel.add(new Konva.Text({
+    text: arenaId,
+    fontSize: 16,
+    fill: 'black',
+    padding: 4
+  }));
+  group.add(arenaLabel);
+  // 為每個角點建立拖曳控制點
+  let corners = [];
+  for (let i = 0; i < 4; i++) {
+    let cx = defaultPoints[i*2];
+    let cy = defaultPoints[i*2 + 1];
+    const corner = new Konva.Circle({
+      x: cx,
+      y: cy,
+      radius: 6,
+      fill: 'rgba(255,255,255,0.5)',
+      stroke: '#000000',
+      strokeWidth: 1,
+      draggable: true,
+      name: `corner_${i}`,
+      dragBoundFunc: (pos) => {
+        let stageW = stage.width();
+        let stageH = stage.height();
+        let newX = clamp(pos.x, 0, stageW);
+        let newY = clamp(pos.y, 0, stageH);
+        return { x: newX, y: newY };
+      }
+    });
+    corner.on('mousedown', (e) => {
+      if (e.evt.button !== 0) return;
+      e.cancelBubble = true;
+      selectarena(arenaId);
+    });
+    corner.on('dragmove', function(e) {
+      if (e.evt.button !== 0) return;
+      e.cancelBubble = true;
+      let currentPoints = polygon.points();
+      currentPoints[i*2] = corner.x();
+      currentPoints[i*2 + 1] = corner.y();
+      polygon.points(currentPoints);
+      updateLabelPosition(arenaLabel, currentPoints);
+      layer.batchDraw();
+      updatearenaList();
+    });
+    corners.push(corner);
+    group.add(corner);
+  }
+  layer.add(group);
+  layer.draw();
+  const arenaObj = {
+    id: arenaId,
+    numericId: numericId,
+    group: group,
+    polygon: polygon,
+    corners: corners,
+    label: arenaLabel
+  };
+  arenaList.push(arenaObj);
+  selectarena(arenaId);
+  updatearenaList();
+}
+
+// 更新標籤位置，使標籤在 arena 內保持合適位置
+function updateLabelPosition(label, points) {
+  let minX = points[0], minY = points[1];
+  for (let i = 2; i < points.length; i += 2) {
+    if (points[i] < minX) minX = points[i];
+    if (points[i+1] < minY) minY = points[i+1];
+  }
+  label.x(minX + 5);
+  label.y(minY + 5);
+}
+
+// 選取 arena（點擊時將其邊框加粗）
+function selectarena(arenaId) {
+  arenaList.forEach(r => { r.polygon.strokeWidth(1); });
+  const arenaObj = arenaList.find(r => r.id === arenaId);
+  if (arenaObj) {
+    arenaObj.polygon.strokeWidth(2);
+    selectedarena = arenaObj;
+    layer.draw();
+  }
+}
+
+// 更新隱藏欄位 "arena_data" 的內容，供後續最終提交時使用
+function updatearenaList() {
+    if (!Array.isArray(arenaList)) {
+        console.error("arenaList is not an array or not defined:", arenaList);
+        return;
+    }
+
+    const data = arenaList.map(r => {
+        let points = r.polygon.points();
+        if (!Array.isArray(points)) {
+            console.error("Polygon points is not an array:", points);
+            return null;
+        }
+
+        // 取得群組的位移量 (如果有拖動 arena)
+        const groupOffset = { x: r.group.x(), y: r.group.y() };
+        
+        // 只儲存四個頂點的 (x, y) 坐標
+        const formattedPoints = [];
+        for (let i = 0; i < points.length; i += 2) {
+            formattedPoints.push([
+                (points[i] + groupOffset.x) / window.scaleFactorX,    // x 座標
+                (points[i + 1] + groupOffset.y) / window.scaleFactorY // y 座標
+            ]);
+        }
+
+        return {
+            id: r.id,
+            points: formattedPoints  // **只存四個點的 (x, y)**
+        };
+    }).filter(item => item !== null);  // 過濾掉 null 值
+
+    // 更新隱藏的 arena JSON 欄位
+    const arenaDataField = document.getElementById("arena_data");
+    if (arenaDataField) {
+        arenaDataField.value = JSON.stringify(data);
+    }
+}
+
+
+// 提交 arena 資料（此函式僅在前端用於調試）
+function submitarena() {
+  updatearenaList();
+  const arenaDataField = document.getElementById("arena_data");
+  console.log("提交 arena 資料：", arenaDataField.value);
+}
+
+
+// 刪除選取的 arena
+function removeSelectedarena() {
+    if (!selectedarena) {
+      console.warn("沒有選取任何 arena。");
+      return;
+    }
+    selectedarena.group.destroy();
+    releaseNumericID(selectedarena.numericId);
+    arenaList = arenaList.filter(r => r.id !== selectedarena.id);
+    selectedarena = null;
+    layer.draw();
+    updatearenaList();
+}
+
+// ========= 新增功能：全選畫布 =========
+// 當按下 "Select Whole Canvas" 按鈕時，將 arena 設為整個畫布範圍
+function selectWholeCanvasarena() {
+    if (!stage) {
+        console.error("Stage 尚未初始化");
+        return;
+    }
+
+    // 定義全畫布的四個角點
+    let fullPoints = [
+      0, 0,
+      stage.width(), 0,
+      stage.width(), stage.height(),
+      0, stage.height()
+    ];
+
+    if (selectedarena) {
+        selectedarena.group.x(0);
+        selectedarena.group.y(0);
+        selectedarena.polygon.points(fullPoints);
+
+        // 確保角點與 arena 同步
+        for (let i = 0; i < 4; i++) {
+            selectedarena.corners[i].x(fullPoints[i * 2]);
+            selectedarena.corners[i].y(fullPoints[i * 2 + 1]);
+        }
+
+        updateLabelPosition(selectedarena.label, fullPoints);
+        layer.batchDraw();
+        updatearenaList();
+    } else {
+        createNewarena(fullPoints);
+    }
+}
+
+
+</script>
