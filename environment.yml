@@ -1,0 +1,23 @@
+name: moticlip
+channels:
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - pillow
+  - jupyter
+  - tqdm
+  - pybind11
+  - cmake
+  - cudatoolkit-dev
+  - cudnn
+  - pip
+  - pip:
+      - gradio
+      - opencv-python
+      - av
+      - imageio-ffmpeg
+      - nvidia-dali-cuda110

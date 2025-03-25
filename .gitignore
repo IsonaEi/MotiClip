@@ -8,7 +8,9 @@ __pycache__/
 *.a
 *.out
 *.dylib
+*.pem
 .ipynb_checkpoints/
+MotiClip/src/.gradio
 
 # 虛擬環境
 venv/

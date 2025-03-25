@@ -1,65 +1,71 @@
-1. 原始資料輸入 (Raw Data Input)
-資料結構
-每筆原始資料包含：
-一部影片 (格式可能不統一)
-一個 JSON metadata
-內含多個 arena 的資訊，每個 arena 以四個頂點 (x,y) 表示，可能構成不規則的四邊形。
-資料讀取
-讀取影片與對應的 JSON metadata。
-確認 JSON 中的 arena 資訊是否正確可用。
-2. Arena 裁切 (Cropping)
-目的
-根據 JSON 中定義的 arena 座標，將原影片裁切出所需區域。
-注意：arena 可能不是矩形，需要做多邊形 (四邊形) 的裁切或變形 (例如透視校正)。
-實作要點
-依據四個頂點做影像裁切或透視轉換 (可用 OpenCV 或其他影像處理工具)。
-若同一部影片有多個 arena，則分別輸出對應的裁切影片。
-3. 統一影片編碼 (Transcoding)
-目的
-將前一步產生的裁切影片，轉成統一的 H.264 (mp4) 格式，以便後續處理與儲存。
-考量
-視專案需求決定是否進行解析度壓縮、FPS 調整等。
-可利用 GPU 加速 (如 NVIDIA FFmpeg、GStreamer、或其他硬體轉碼工具) 來提升效能。
-4. Filtering (含 Motion Filtering)
-此階段的核心是使用 NVIDIA TensorRT-Accelerated Optical Flow 進行 Motion Filtering，並可依需求保留其他篩選條件。
+────────────────────────────── MotiClip Video Data Curation Pipeline – 完整計畫
 
-Motion Filtering
+本計畫旨在建立一個高效能的影片資料處理流程，最終產出高品質的動物（小鼠）行為運動片段，供後續訓練 animal visual foundation model 使用。整個流程分為兩大階段：第一階段在 CPU 上進行預處理（裁切 Arena 與統一影片編碼格式），第二階段在 GPU 上進行運動偵測與 Motion Filtering。以下為詳細流程與各部分細節：
 
-輸入：經裁切與統一編碼的影片 (或影片切片)。
-演算法：
-擷取光流 (NVIDIA TensorRT-accelerated Optical Flow)。
-根據光流資訊判斷運動強度、模式 (靜止、劇烈晃動等)。
-閾值與參數：
-Clip 長度上下限 (最短/最長可保留多少秒或幀數)。
-兩個 clip 之間的最小間隔 (避免過度切割)。
-運動偵測閾值 (多大運動幅度才算「動作」)。
-運動持續時間 (多長的連續運動才保留為一個 clip)。
-結果：
-滿足運動條件的區段會被保留下來成為候選 clip；過於靜止或晃動嚴重的部分被排除。
-(可選) 其他篩選
+【第一階段 – 預處理（CPU-based）】
 
-視覺品質 (解析度、畫質、曝光等)。
-文字疊加 (字幕、水印等) 過多則排除。
-類型篩選 (如需要排除卡通、動畫等)。
-5. 輸出 Video Clips
-目的
-產生最終可用於後續模型微調 (fine-tune) 或分析的影片片段 (clips)。
-輸出格式
-H.264 (mp4) 為主，對應後續流程需求。
-可搭配相應的 JSON 或其他 metadata (例如 clip 的開始/結束時間、運動強度等)。
-檔案管理
-建議按資料集結構進行存放：
-dataset/clip_001.mp4
-dataset/clip_002.mp4
-…
-若同一筆原始資料有多個 arena，應有對應的檔名或資料夾命名規則。
-6. 參數與流程動態調整
-門檻值 (Thresholds)
-運動偵測閾值、最短/最長 clip 時長等，都應該留有彈性，可在不同實驗中微調。
-監控與除錯 (Monitoring & Debugging)
-在大批量處理前，先用少量測試集 (影片 + metadata) 進行測試，檢查是否符合預期。
-擴充性
-如果未來需要更多篩選條件 (例如顏色分佈、特定物件偵測)，可在此 Pipeline 中插入額外的 Filter 模組。
-7. 總結
-原始資料 (影片 + JSON) → Arena 裁切 → H.264 統一編碼 → Motion Filtering & 其他篩選 → 輸出 Clips
-透過此流程，可有效管理多個 arena、確保影片品質一致，並保留有意義的動作片段，最終得到高品質、可用於模型微調的短影片片段。
+原始資料輸入 (Raw Data Input)
+
+每筆原始資料包含影片檔案（mp4、avi、mov 等）與對應的 JSON metadata。
+JSON metadata 內含多個 arena 的資訊，每個 arena 以四個頂點 (x, y) 表示，可能構成不規則四邊形。
+使用 ffmpeg、pyav 與 OpenCV 在 CPU 上讀取影片及 JSON metadata，並驗證 arena 資訊正確性。
+Arena 裁切與透視校正 (Cropping)
+
+根據 JSON 中定義的 arena 座標，使用 OpenCV、pyav 與 ffmpeg 在 CPU 上對影片進行裁切與透視校正。
+若同一部影片有多個 arena，分別產生對應的裁切影片。
+目標在於移除不必要的背景，只保留感興趣區域。
+
+
+統一影片編碼 (Transcoding)
+
+將裁切與校正後的影片轉換為統一的 H.264 (mp4) 格式，以便後續處理。
+使用 ffmpeg、pyav 或 OpenCV 完成編碼，輸出格式需符合 NVIDIA DALI 可讀取的要求。
+輸出結果為統一格式的影片，存放於指定目錄中。
+
+
+
+【第二階段 – 運動偵測與 Motion Filtering (GPU-based)】 
+
+GPU 讀取與解碼
+
+光流計算
+
+將 DALI 輸出的 GPU Tensor 轉換為適合光流演算法所需的格式（例如轉為 GPU 可處理的 OpenCV Mat 或 PyTorch Tensor）。
+使用現成的 Python 解決方案（例如 OpenCV CUDA OpticalFlowDual_TVL1 或基於 PyTorch 的 RAFT 模型），在 GPU 上計算連續幀之間的光流向量場。
+輸出為 GPU Buffer 或相應的張量格式，格式為 (H, W, 2)，其中每個像素包含 [dx, dy] 表示水平與垂直方向的位移。
+
+
+
+光流後處理與運動強度計算
+
+使用 CuPy 在 GPU 上對光流數據進行後處理： a. 根據每個像素的 [dx, dy] 計算運動強度：motion_magnitude = sqrt(dx² + dy²)。 b. 設定較低閾值，生成初步的二值掩模：運動強度大於閾值的像素標記為 1，否則為 0。 c. 對初步二值掩模進行形態學處理（如開運算或閉運算），以去除噪音、消除孤立點，並連通真正代表小鼠運動的區域，得到乾淨的二值運動掩模。 d. 將乾淨的二值掩模套用回原始光流數據，只保留小鼠運動區域，其他部分置零。 e. 在過濾後的光流數據中，僅對有效區域計算平均運動強度，得到每幀的全局運動指標。
+根據預設閾值對每幀進行標記（1：有運動；0：靜止）。
+
+
+影片片段整理與篩選
+
+遍歷影片所有幀的運動標記，根據clip 長度上下限、片段之間的最小間隔等參數決定影片片段。
+
+
+
+影片編碼與輸出
+
+使用 NVIDIA NVENC（透過PyNvVideoCodec）在 GPU 上進行硬體加速編碼。
+將篩選後的影片片段編碼為 H.264 格式的 MP4 影片（從 CUDA Buffer 轉為 H.264 bitstream）。
+同時生成相應的 metadata（例如 JSON 或 CSV），記錄每個片段的起始與結束幀、平均運動強度以及所屬的 arena 資訊。
+
+
+【參數與流程動態調整】
+
+動態調整運動偵測閾值、最小連續幀數、形態學處理參數等，以滿足不同實驗需求。
+增加日誌記錄與錯誤捕捉功能，便於流程監控與除錯。
+在大規模處理前，先以少量測試資料驗證整體流程的正確性與穩定性。
+
+
+【流程總結】 第一階段 (CPU-based)：
+原始影片與 metadata 輸入 → Arena 裁切與透視校正 → 輸出統一格式編碼 (H.264 mp4)影片
+
+第二階段 (GPU-based)：
+使用 DALI 讀取統一格式影片 (GPU Tensor) → NVIDIA Optical Flow SDK 計算光流 → CuPy 進行光流閾值、形態學處理與平均運動強度計算 → 根據運動標記篩選並整理影片片段 (CUDA Buffer) → 使用 NVENC 編碼為 H.264 (MP4) → 輸出包含小鼠運動的影片片段及相應 metadata
+
+最終目標是透過高效能的 CPU 與 GPU 協同處理流程，先清理並統一原始資料，再利用全程 GPU 加速的運動偵測管線，產生高品質的動物行為運動片段，供後續訓練 animal visual foundation model 使用。 ──────────────────────────────
